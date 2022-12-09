@@ -8,6 +8,20 @@ import json
 
 NUM_PREPROCESSING_WORKERS = 2
 
+def change_label(example):
+    label = example['label']
+    if label == 'entailment' or label == 'e':
+        example['label'] = 0
+    elif label == 'neutral' or label == 'n':
+        example['label'] = 1
+    elif label == 'contradiction' or label == 'c':
+        example['label'] = 2
+    else:
+        example['label'] = -1
+    # change the premises and hypotheses to strings for preprocessing to work
+    example['premise'] = str(example['premise'])
+    example['hypothesis'] = str(example['hypothesis'])
+    return example
 
 def main():
     argp = HfArgumentParser(TrainingArguments)
@@ -52,12 +66,70 @@ def main():
     # Dataset selection
     if args.dataset.endswith('.json') or args.dataset.endswith('.jsonl'):
         dataset_id = None
+        
         # Load from local json/jsonl file
-        dataset = datasets.load_dataset('json', data_files=args.dataset)
+        data_files = {"train": "/content/gdrive/MyDrive/nlp/adversarial_data/train.jsonl", "validation": "/content/gdrive/MyDrive/nlp/adversarial_data/test.jsonl"}
+        dataset = datasets.load_dataset('json', data_files=data_files)
         # By default, the "json" dataset loader places all examples in the train split,
         # so if we want to use a jsonl file for evaluation we need to get the "train" split
         # from the loaded dataset
-        eval_split = 'train'
+        # eval_split = 'train'
+        eval_split = 'validation'
+
+        # do preprocessing on the training dataset
+        train_dataset = dataset['train']
+        # remove extraneous columns
+        train_dataset = train_dataset.remove_columns(["uid", "reason", "emturk", "genre", "tag", "model_label"])
+        # rename columns
+        train_dataset = train_dataset.rename_column("context", "premise")
+        # change gold labels from strings to integers
+        dataset['train'] = train_dataset.map(change_label)
+        print(dataset['train'][0])
+
+        # do preprocessing on the testing dataset
+        val_dataset = dataset['validation']
+        # remove extraneous columns"
+        val_dataset = val_dataset.remove_columns(["uid", "reason", "emturk", "genre", "tag", "model_label"])
+        # rename columns
+        val_dataset = val_dataset.rename_column("context", "premise")
+        # change gold labels from strings to integers and stringify all examples
+        dataset['validation'] = val_dataset.map(change_label)
+        
+        # remove SNLI examples with no label
+        dataset = dataset.filter(lambda ex: ex['label'] != -1)
+
+    elif args.dataset.endswith('.csv'):
+        # run contrast datasets
+        data_files = {"train": "/content/gdrive/MyDrive/nlp/contrast_data/csv/train.csv", "validation": "/content/gdrive/MyDrive/nlp/contrast_data/csv/test.csv"}
+        dataset = datasets.load_dataset("csv", data_files=data_files)
+        
+        # do preprocessing on the training dataset
+        train_dataset = dataset['train']
+        # remove extraneous columns
+        train_dataset = train_dataset.remove_columns(["index", "captionID", "pairID", "sentence1_binary_parse", "sentence2_binary_parse", "sentence1_parse", "sentence2_parse", "label1", "label2", "label3", "label4", "label5", "col"])
+        # rename columns
+        train_dataset = train_dataset.rename_column("sentence1", "premise")
+        train_dataset = train_dataset.rename_column("sentence2", "hypothesis")
+        train_dataset = train_dataset.rename_column("gold_label", "label")
+        # change gold labels from strings to integers
+        dataset['train'] = train_dataset.map(change_label)
+
+        # do preprocessing on the testing dataset
+        val_dataset = dataset['validation']
+        # remove extraneous columns
+        val_dataset = val_dataset.remove_columns(["index", "captionID", "pairID", "sentence1_binary_parse", "sentence2_binary_parse", "sentence1_parse", "sentence2_parse", "label1", "label2", "label3", "label4", "label5", "col"])
+        # rename columns
+        val_dataset = val_dataset.rename_column("sentence1", "premise")
+        val_dataset = val_dataset.rename_column("sentence2", "hypothesis")
+        val_dataset = val_dataset.rename_column("gold_label", "label")
+        # change gold labels from strings to integers and stringify all examples
+        dataset['validation'] = val_dataset.map(change_label)
+        
+        # remove SNLI examples with no label
+        dataset = dataset.filter(lambda ex: ex['label'] != -1)
+
+        eval_split = 'validation'
+        dataset_id = None
     else:
         default_datasets = {'qa': ('squad',), 'nli': ('snli',)}
         dataset_id = tuple(args.dataset.split(':')) if args.dataset is not None else \
